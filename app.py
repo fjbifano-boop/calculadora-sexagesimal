@@ -17,10 +17,15 @@ def parse_sexagesimal(s: str) -> Fraction:
     Convierte una cadena sexagesimal a Fraction.
 
     Ejemplos admitidos:
-    2;13,20
-    0;27
+    8;30
+    2;13;20
     5
-    -1;12,30
+    -1;12;30
+
+    Nota:
+    Se admite también la coma como separador de posiciones
+    fraccionarias por compatibilidad con entradas anteriores:
+    2;13,20
     """
     s = s.strip().replace(" ", "")
 
@@ -32,36 +37,46 @@ def parse_sexagesimal(s: str) -> Fraction:
     if s.startswith(("-", "+")):
         s = s[1:]
 
-    if ";" in s:
-        integer_part, fractional_part = s.split(";", 1)
-        integer_part = int(integer_part) if integer_part else 0
-        digits = fractional_part.split(",") if fractional_part else []
-    else:
-        integer_part = int(s)
-        digits = []
+    # Compatibilidad: 2;13,20 -> 2;13;20
+    s = s.replace(",", ";")
 
-    value = Fraction(integer_part, 1)
+    parts = s.split(";")
 
-    for i, digit in enumerate(digits, start=1):
-        if digit == "":
-            raise ValueError("Hay una posición sexagesimal vacía.")
+    if any(part == "" for part in parts):
+        raise ValueError("Hay una posición sexagesimal vacía.")
 
-        n = int(digit)
+    digits = [int(part) for part in parts]
 
-        if not 0 <= n < 60:
+    # Todas las posiciones salvo la primera deben estar entre 0 y 59.
+    for d in digits[1:]:
+        if not 0 <= d < 60:
             raise ValueError(
-                "Cada posición sexagesimal debe contener un valor entre 0 y 59."
+                "Cada posición sexagesimal posterior a la primera debe estar entre 0 y 59."
             )
 
-        value += Fraction(n, 60**i)
+    # Interpretación convencional de la app:
+    # la primera posición se toma como unidades y las siguientes
+    # como 1/60, 1/60², etc.
+    value = Fraction(digits[0], 1)
+
+    for i, d in enumerate(digits[1:], start=1):
+        value += Fraction(d, 60**i)
 
     return sign * value
 
 
-def to_sexagesimal(x, places=4) -> str:
+def to_sexagesimal(x, places=5) -> str:
     """
-    Convierte Fraction o float a notación sexagesimal.
+    Convierte un número a notación sexagesimal posicional completa.
+
+    Ejemplos:
+    8.5     -> 8;30
+    72.25   -> 1;12;15
+    2.2222  -> 2;13;19;55...
+
+    La parte entera también se descompone en potencias de 60.
     """
+
     if isinstance(x, float):
         x = Fraction(x).limit_denominator(10**9)
 
@@ -71,24 +86,33 @@ def to_sexagesimal(x, places=4) -> str:
     integer_part = x.numerator // x.denominator
     remainder = x - integer_part
 
-    digits = []
+    # Parte entera en base 60
+    integer_digits = []
+
+    if integer_part == 0:
+        integer_digits = [0]
+    else:
+        n = integer_part
+
+        while n > 0:
+            integer_digits.insert(0, n % 60)
+            n //= 60
+
+    # Parte fraccionaria
+    fractional_digits = []
 
     for _ in range(places):
+        if remainder == 0:
+            break
+
         remainder *= 60
         digit = remainder.numerator // remainder.denominator
-        digits.append(int(digit))
+        fractional_digits.append(int(digit))
         remainder -= digit
 
-    # Elimina ceros finales innecesarios
-    while digits and digits[-1] == 0:
-        digits.pop()
+    digits = integer_digits + fractional_digits
 
-    if not digits:
-        return f"{sign}{integer_part}"
-
-    return f"{sign}{integer_part};" + ",".join(
-        f"{digit:02d}" for digit in digits
-    )
+    return sign + ";".join(str(d) for d in digits)
 
 
 def decimal_string(x: Fraction, decimals=10) -> str:
@@ -118,12 +142,26 @@ st.info(
     """
     **Convención utilizada**
 
-    `2;13,20` significa:
+    Las posiciones se separan con `;`.
 
-    2 + 13/60 + 20/60²
+    Por ejemplo:
 
-    El punto y coma separa la parte entera y la coma separa
-    las posiciones sexagesimales.
+    `8;30`
+
+    representa:
+
+    8 + 30/60
+
+    y
+
+    `1;12;15`
+
+    representa:
+
+    1×60 + 12 + 15/60
+
+    La aplicación también acepta entradas como `2;13,20`
+    y las interpreta como `2;13;20`.
     """
 )
 
@@ -144,14 +182,14 @@ with tab_calculator:
     with col1:
         a_text = st.text_input(
             "Número A",
-            value="2;13,20",
+            value="8;30",
             key="number_a"
         )
 
     with col2:
         b_text = st.text_input(
             "Número B",
-            value="0;27",
+            value="",
             key="number_b"
         )
 
@@ -181,6 +219,8 @@ with tab_calculator:
             a = parse_sexagesimal(a_text)
 
             if operation in ["A + B", "A − B", "A × B", "A ÷ B"]:
+                if not b_text.strip():
+                    raise ValueError("Ingresá un valor para el número B.")
                 b = parse_sexagesimal(b_text)
 
             if operation == "A + B":
@@ -227,6 +267,11 @@ with tab_calculator:
                         f"{root:.10f}"
                     )
 
+                with st.expander("Ver valor interpretado"):
+                    st.write(
+                        f"**A:** {a_text} = {decimal_string(a)}"
+                    )
+
                 st.stop()
 
             st.success("Resultado")
@@ -247,8 +292,7 @@ with tab_calculator:
 
             with st.expander("Ver valores interpretados"):
                 st.write(
-                    f"**A:** {to_sexagesimal(a, places)} "
-                    f"= {decimal_string(a)}"
+                    f"**A:** {a_text} = {decimal_string(a)}"
                 )
 
                 if operation in [
@@ -258,8 +302,7 @@ with tab_calculator:
                     "A ÷ B"
                 ]:
                     st.write(
-                        f"**B:** {to_sexagesimal(b, places)} "
-                        f"= {decimal_string(b)}"
+                        f"**B:** {b_text} = {decimal_string(b)}"
                     )
 
         except Exception as e:
@@ -286,7 +329,7 @@ with tab_converter:
 
         value_text = st.text_input(
             "Número sexagesimal",
-            value="2;13,20",
+            value="1;12;15",
             key="sex_to_dec"
         )
 
@@ -306,7 +349,7 @@ with tab_converter:
 
         decimal_text = st.text_input(
             "Número decimal",
-            value="2.222222",
+            value="72.25",
             key="dec_to_sex"
         )
 
@@ -336,7 +379,7 @@ with tab_converter:
 
 
 # -------------------------------------------------
-# Nota
+# Nota y contacto
 # -------------------------------------------------
 
 st.divider()
@@ -345,4 +388,12 @@ st.caption(
     "Calculadora diseñada para explorar operaciones en sistema "
     "sexagesimal y apoyar el estudio de prácticas matemáticas "
     "paleobabilónicas."
+)
+
+st.markdown(
+    """
+    **Contacto:** Fernando Bifano  
+    CeFIEC/CCPEMS – FCEN, UBA  
+    ✉️ [fjbifano@ccpems.exactas.uba.ar](mailto:fjbifano@ccpems.exactas.uba.ar)
+    """
 )
