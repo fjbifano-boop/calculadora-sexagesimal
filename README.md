@@ -1,1 +1,4 @@
-# calculadora-sexagesimal
+calculadora-sexagesimal/
+│
+├── calculadora_sexagesimal.py
+└── requirements.txt
